@@ -14,6 +14,8 @@ if (!inputPath || !outputPath) {
 const { queries = [], cards = [], dest, headed } = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
 
 const ATTEMPTS = 3;
+// Строки с «@@» читает программа, чтобы показывать ход проверки в интерфейсе
+const report = (event) => console.error('@@' + JSON.stringify(event));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Страница открывается, а нужный ответ API ловится по адресу
@@ -38,8 +40,8 @@ const fetchCard = (page, id) =>
     (u) => u.includes('/cards/') && u.includes('/detail?') && u.endsWith('nm=' + id));
 
 const tasks = [
-  ...queries.map((query) => ({ kind: 'query', query, label: query, run: (page) => fetchQuery(page, query) })),
-  ...cards.map((id) => ({ kind: 'card', id, label: 'карточка ' + id, run: (page) => fetchCard(page, id) })),
+  ...queries.map((query) => ({ kind: 'query', query, label: `запрос «${query}»`, run: (page) => fetchQuery(page, query) })),
+  ...cards.map((id) => ({ kind: 'card', id, label: 'карточка товара ' + id, run: (page) => fetchCard(page, id) })),
 ];
 
 const out = fs.openSync(outputPath, 'w');
@@ -55,6 +57,7 @@ try {
   for (const [i, task] of tasks.entries()) {
     const { run, label, ...head } = task;
     let result = { ...head, ok: false, error: '' };
+    report({ event: 'start', i: i + 1, n: tasks.length, label });
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
       try {
         result = { ...head, ok: true, ...(await run(page)) };
@@ -62,11 +65,13 @@ try {
       } catch (e) {
         result.error = String(e.message).split('\n')[0];
         console.error(`  попытка ${attempt}/${ATTEMPTS} не удалась: ${result.error}`);
+        if (attempt < ATTEMPTS) report({ event: 'retry', i: i + 1, n: tasks.length, label, error: result.error });
         await sleep(5000 * attempt);
       }
     }
     if (!result.ok) failed++;
     fs.writeSync(out, JSON.stringify(result) + '\n');
+    report({ event: 'done', i: i + 1, n: tasks.length, label, error: result.ok ? '' : result.error });
     console.error(`[${i + 1}/${tasks.length}] ${label}: ${result.ok ? result.data.products.length + ' товаров' : 'ОШИБКА'}`);
     if (i < tasks.length - 1) await sleep(2000 + Math.random() * 2000);
   }

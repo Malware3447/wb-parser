@@ -1,3 +1,4 @@
 browser/node_modules/
 data/
+.env
 wb-parser.exe 

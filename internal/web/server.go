@@ -2,9 +2,12 @@
 package web
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -74,12 +77,26 @@ type Server struct {
 	tmpl    *template.Template
 	mux     *http.ServeMux
 
-	mu       sync.Mutex
-	running  bool
-	lastRun  time.Time
-	lastErr  string
-	lastDone int
+	mu      sync.Mutex
+	running bool
+	// Ход идущей проверки
+	started time.Time
+	total   int
+	done    int
+	current string
+	retry   string
+	// Итог последней проверки
+	lastRun   time.Time
+	lastErr   string
+	lastDone  int
+	lastTotal int
+	failures  []string
 }
+
+const (
+	sessionCookie = "wb_session"
+	sessionTTL    = 30 * 24 * time.Hour
+)
 
 // New создаёт сервер интерфейса.
 // base — путь, под которым интерфейс виден снаружи (например, /wb), пустой для корня
@@ -93,6 +110,9 @@ func New(st *store.Store, fetcher, at string, loc *time.Location, auth, base str
 		"idx":     formatIndex,
 		"signed":  formatSigned,
 		"versus":  versus,
+		"percentOf": func(done, total int) int {
+			return done * 100 / total
+		},
 		"statusText": func(index float64) string {
 			text, _ := priceStatus(s.store.Settings(), index)
 			return text
@@ -111,19 +131,86 @@ func New(st *store.Store, fetcher, at string, loc *time.Location, auth, base str
 	s.mux.HandleFunc("/sku/delete", s.deleteSKU)
 	s.mux.HandleFunc("/settings", s.saveSettings)
 	s.mux.HandleFunc("/run", s.run)
+	s.mux.HandleFunc("/status.json", s.statusJSON)
 	return s
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.auth != "" {
-		user, pass, ok := r.BasicAuth()
-		if !ok || subtle.ConstantTimeCompare([]byte(user+":"+pass), []byte(s.auth)) != 1 {
-			w.Header().Set("WWW-Authenticate", `Basic realm="wb-parser"`)
-			http.Error(w, "Нужен вход", http.StatusUnauthorized)
+		switch {
+		case r.URL.Path == "/login":
+			s.login(w, r)
+			return
+		case r.URL.Path == "/logout":
+			s.logout(w, r)
+			return
+		case !s.signedIn(r):
+			if r.URL.Path == "/status.json" {
+				http.Error(w, "Нужен вход", http.StatusUnauthorized)
+				return
+			}
+			http.Redirect(w, r, s.base+"/login", http.StatusSeeOther)
 			return
 		}
 	}
 	s.mux.ServeHTTP(w, r)
+}
+
+// --- вход ---
+
+// sessionValue подписывает срок действия входа: подделать его, не зная логина и пароля, нельзя
+func (s *Server) sessionValue(expires int64) string {
+	key := sha256.Sum256([]byte("wb-parser session:" + s.auth))
+	mac := hmac.New(sha256.New, key[:])
+	fmt.Fprint(mac, expires)
+	return strconv.FormatInt(expires, 10) + "." + hex.EncodeToString(mac.Sum(nil))
+}
+
+func (s *Server) signedIn(r *http.Request) bool {
+	cookie, err := r.Cookie(sessionCookie)
+	if err != nil {
+		return false
+	}
+	expires, err := strconv.ParseInt(strings.SplitN(cookie.Value, ".", 2)[0], 10, 64)
+	if err != nil || time.Now().Unix() > expires {
+		return false
+	}
+	return hmac.Equal([]byte(cookie.Value), []byte(s.sessionValue(expires)))
+}
+
+func (s *Server) setSession(w http.ResponseWriter, r *http.Request, value string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{
+		Name: sessionCookie, Value: value, Path: s.base + "/", MaxAge: maxAge,
+		HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		Secure: r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
+	})
+}
+
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		if s.signedIn(r) {
+			http.Redirect(w, r, s.base+"/", http.StatusSeeOther)
+			return
+		}
+		s.render(w, "login", map[string]interface{}{"Base": s.base})
+		return
+	}
+	given := r.FormValue("login") + ":" + r.FormValue("password")
+	if subtle.ConstantTimeCompare([]byte(given), []byte(s.auth)) != 1 {
+		// Пауза мешает перебирать пароли
+		time.Sleep(time.Second)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusUnauthorized)
+		s.render(w, "login", map[string]interface{}{"Base": s.base, "Login": r.FormValue("login"), "Error": "Неверный логин или пароль"})
+		return
+	}
+	s.setSession(w, r, s.sessionValue(time.Now().Add(sessionTTL).Unix()), int(sessionTTL.Seconds()))
+	http.Redirect(w, r, s.base+"/", http.StatusSeeOther)
+}
+
+func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	s.setSession(w, r, "", -1)
+	http.Redirect(w, r, s.base+"/login", http.StatusSeeOther)
 }
 
 // Schedule раз в день в заданное время запускает проверку запросов, по которым сегодня ещё нет выдачи.
@@ -152,10 +239,13 @@ func (s *Server) Start(onlyMissing bool) bool {
 		return false
 	}
 	s.running = true
+	s.started = time.Now()
+	s.total, s.done, s.current, s.retry = 0, 0, "", ""
 	s.mu.Unlock()
 
 	go func() {
-		done, err := s.check(onlyMissing)
+		var failures []string
+		done, err := s.check(onlyMissing, &failures)
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.running = false
@@ -163,7 +253,8 @@ func (s *Server) Start(onlyMissing bool) bool {
 			return
 		}
 		s.lastRun = time.Now().In(s.loc)
-		s.lastDone = done
+		s.lastDone, s.lastTotal = done, s.total
+		s.failures = failures
 		s.lastErr = ""
 		if err != nil {
 			s.lastErr = err.Error()
@@ -173,9 +264,29 @@ func (s *Server) Start(onlyMissing bool) bool {
 	return true
 }
 
+// onProgress запоминает ход проверки для интерфейса
+func (s *Server) onProgress(failures *[]string) func(parser.Progress) {
+	return func(p parser.Progress) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		switch p.Event {
+		case "start":
+			s.current, s.retry = p.Label, ""
+		case "retry":
+			s.retry = p.Error
+		case "done":
+			s.done = p.Index
+			if p.Error != "" {
+				*failures = append(*failures, p.Label+" — "+p.Error)
+			}
+		}
+	}
+}
+
 // check получает выдачу и карточки наших товаров и сохраняет их в снимок за сегодня;
-// возвращает число полученных запросов, −1 — если проверять было нечего
-func (s *Server) check(onlyMissing bool) (int, error) {
+// возвращает число полученных запросов и карточек, −1 — если проверять было нечего.
+// В failures попадают задачи, которые получить не удалось
+func (s *Server) check(onlyMissing bool, failures *[]string) (int, error) {
 	date := time.Now().In(s.loc).Format("2006-01-02")
 	dest := s.store.Settings().Dest
 	queries := s.store.Queries()
@@ -203,8 +314,15 @@ func (s *Server) check(onlyMissing bool) (int, error) {
 		return -1, nil
 	}
 
-	results, fetchErr := parser.Fetch(s.fetcher, queries, cards, dest, false)
+	s.mu.Lock()
+	s.total = len(queries) + len(cards)
+	s.mu.Unlock()
+
+	results, fetchErr := parser.Fetch(s.fetcher, queries, cards, dest, false, s.onProgress(failures))
 	if len(results) == 0 {
+		if fetchErr == nil {
+			fetchErr = fmt.Errorf("браузер не вернул ни одного ответа")
+		}
 		return 0, fetchErr
 	}
 
@@ -230,6 +348,7 @@ func (s *Server) check(onlyMissing bool) (int, error) {
 						basic, sale := p.Prices()
 						*card = store.Card{CheckedAt: now, Dest: dest, Root: p.Root, Brand: p.Brand, Name: p.Name, Supplier: p.Supplier,
 							Basic: basic, Price: sale, Rating: p.ReviewRating, Feedbacks: p.Feedbacks}
+						done++
 						break
 					}
 				}
@@ -483,19 +602,41 @@ func (s *Server) stat(sku store.SKU, dates []string) skuStat {
 // --- страницы ---
 
 type status struct {
-	Running  bool
-	LastRun  time.Time
-	LastErr  string
-	LastDone int
-	At       string
-	Region   string
+	Running bool `json:"running"`
+	// Ход идущей проверки
+	Total   int    `json:"total"`
+	Done    int    `json:"done"`
+	Current string `json:"current"`
+	Retry   string `json:"retry"`
+	Seconds int    `json:"seconds"`
+	// Итог последней проверки
+	LastRun   time.Time `json:"-"`
+	LastErr   string    `json:"-"`
+	LastDone  int       `json:"-"`
+	LastTotal int       `json:"-"`
+	Failures  []string  `json:"-"`
+	At        string    `json:"-"`
+	Region    string    `json:"-"`
 }
 
 func (s *Server) status() status {
 	region := regionName(s.store.Settings().Dest)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return status{Running: s.running, LastRun: s.lastRun, LastErr: s.lastErr, LastDone: s.lastDone, At: s.at, Region: region}
+	st := status{Running: s.running, LastRun: s.lastRun, LastErr: s.lastErr, LastDone: s.lastDone, LastTotal: s.lastTotal,
+		Failures: s.failures, At: s.at, Region: region}
+	if s.running {
+		st.Total, st.Done, st.Current, st.Retry = s.total, s.done, s.current, s.retry
+		st.Seconds = int(time.Since(s.started).Seconds())
+	}
+	return st
+}
+
+// statusJSON отдаёт ход проверки: страница опрашивает его, пока проверка идёт
+func (s *Server) statusJSON(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	json.NewEncoder(w).Encode(s.status())
 }
 
 func (s *Server) recentDates() []string {
@@ -832,7 +973,8 @@ func (s *Server) back(w http.ResponseWriter, r *http.Request, path, notice strin
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
-func (s *Server) render(w http.ResponseWriter, name string, data interface{}) {
+func (s *Server) render(w http.ResponseWriter, name string, data map[string]interface{}) {
+	data["Auth"] = s.auth != ""
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tmpl.ExecuteTemplate(w, name, data); err != nil {
 		log.Printf("Ошибка шаблона %s: %v", name, err)

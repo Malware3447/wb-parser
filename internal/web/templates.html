@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-{{if .Status.Running}}<meta http-equiv="refresh" content="5">{{end}}
 <title>Выдача Wildberries</title>
 <style>
 :root { --bg:#f6f6f8; --card:#fff; --text:#1c1c22; --muted:#6d6d78; --line:#e3e3ea; --accent:#7b2cbf; --ours:#f3e8ff; --up:#1a7f37; --down:#c62828;
@@ -57,27 +56,91 @@ label { display:block; font-size:13px; color:var(--muted); margin-bottom:4px; }
 details summary { cursor:pointer; color:var(--accent); }
 .tabs a { padding:4px 10px; border:1px solid var(--line); border-radius:8px; margin-right:4px; }
 .tabs a.on { background:var(--accent); color:var(--card); border-color:var(--accent); }
+.progress { border-color:var(--accent); }
+.progress .line { display:flex; gap:10px; align-items:center; font-weight:600; }
+.spin { width:16px; height:16px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; flex:none; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.track { height:8px; background:var(--line); border-radius:99px; overflow:hidden; margin:10px 0 8px; }
+.track div { height:100%; background:var(--accent); border-radius:99px; transition:width .4s; }
+.failed { border-color:var(--down); }
+.failed ul { margin:6px 0 0; padding-left:20px; }
+.top { display:flex; gap:14px; align-items:center; }
+.login { display:grid; grid-template-columns:1.25fr 1fr; gap:16px; align-items:start; margin-top:4vh; }
+@media (max-width:760px) { .login { grid-template-columns:1fr; } .login .enter { order:-1; } }
+.login ol { padding-left:20px; margin:8px 0; } .login li { margin-bottom:8px; }
+.login dt { font-weight:600; margin-top:8px; } .login dd { margin:0; color:var(--muted); }
 </style>
 </head>
 <body><main>{{end}}
 
 {{define "status"}}
 <span class="muted">
-{{if .Running}}Идёт проверка, страница обновится сама…
-{{else if not .LastRun.IsZero}}Последняя проверка {{.LastRun.Format "02.01 15:04"}}: получено запросов — {{.LastDone}}{{if .LastErr}}, <span class="down">{{.LastErr}}</span>{{end}}.
-{{end}}
+{{if and (not .Running) (not .LastRun.IsZero)}}Последняя проверка {{.LastRun.Format "02.01 15:04"}}: получено {{.LastDone}} из {{.LastTotal}}.{{end}}
 Ежедневно в {{.At}}. Регион: {{.Region}}.
 </span>
 {{end}}
+
+{{/* Ход проверки: пока она идёт, страница опрашивает сервер и сама обновляется по окончании */}}
+{{define "progress"}}
+{{with .Status}}
+{{if .Running}}
+<div class="card progress" id="progress" data-url="{{$.Base}}/status.json">
+  <div class="line"><span class="spin"></span><span id="p-title">{{if .Current}}Проверено {{.Done}} из {{.Total}}{{else}}Запускаю браузер…{{end}}</span></div>
+  <div class="track"><div id="p-bar" style="width:{{if .Total}}{{percentOf .Done .Total}}{{else}}0{{end}}%"></div></div>
+  <div class="muted" id="p-text">{{if .Current}}Сейчас: {{.Current}}{{else}}Обычно это занимает 5–10 секунд, затем около 7 секунд на каждый запрос.{{end}}</div>
+  <div class="down" id="p-retry">{{if .Retry}}Не получилось, пробую ещё раз: {{.Retry}}{{end}}</div>
+</div>
+<script>
+(function () {
+  var box = document.getElementById('progress'), failures = 0;
+  function tick() {
+    fetch(box.dataset.url, { cache: 'no-store' }).then(function (r) {
+      if (r.status === 401) { location.reload(); return null; }
+      return r.json();
+    }).then(function (s) {
+      if (!s) return;
+      failures = 0;
+      if (!s.running) { location.reload(); return; }
+      var min = Math.floor(s.seconds / 60), sec = s.seconds % 60;
+      var time = (min ? min + ' мин ' : '') + sec + ' с';
+      document.getElementById('p-title').textContent = s.current
+        ? 'Проверено ' + s.done + ' из ' + s.total + ' · ' + time
+        : 'Запускаю браузер… ' + time;
+      document.getElementById('p-bar').style.width = (s.total ? Math.round(s.done * 100 / s.total) : 0) + '%';
+      if (s.current) document.getElementById('p-text').textContent = 'Сейчас: ' + s.current;
+      document.getElementById('p-retry').textContent = s.retry ? 'Не получилось, пробую ещё раз: ' + s.retry : '';
+      setTimeout(tick, 1500);
+    }).catch(function () {
+      failures++;
+      document.getElementById('p-retry').textContent = failures > 2 ? 'Нет связи с сервером, пробую снова…' : '';
+      setTimeout(tick, 3000);
+    });
+  }
+  setTimeout(tick, 1000);
+})();
+</script>
+{{else if or .LastErr .Failures}}
+<div class="card failed">
+  <b class="down">Последняя проверка ({{.LastRun.Format "02.01 15:04"}}) прошла с ошибками: получено {{.LastDone}} из {{.LastTotal}}.</b>
+  {{if .Failures}}<ul>{{range .Failures}}<li>{{.}}</li>{{end}}</ul>
+  {{else}}<div>{{.LastErr}}</div>{{end}}
+  <div class="muted" style="margin-top:6px">Данные по остальным запросам сохранены. Нажмите «Проверить сейчас» на главной, чтобы повторить.</div>
+</div>
+{{end}}
+{{end}}
+{{end}}
+
+{{define "logout"}}{{if .Auth}}<a href="{{.Base}}/logout" class="muted">Выйти</a>{{end}}{{end}}
 
 {{define "delta"}}{{if gt . 0}}<span class="up">▲{{.}}</span>{{else if lt . 0}}<span class="down">▼{{slice (print .) 1}}</span>{{end}}{{end}}
 
 {{define "index"}}{{template "head" .}}
 <div class="bar">
   <h1>Выдача Wildberries</h1>
-  <form method="post" action="{{.Base}}/run"><button {{if .Status.Running}}disabled{{end}}>Проверить сейчас</button></form>
+  <div class="top">{{template "logout" .}}<form method="post" action="{{.Base}}/run"><button {{if .Status.Running}}disabled{{end}}>{{if .Status.Running}}Идёт проверка…{{else}}Проверить сейчас{{end}}</button></form></div>
 </div>
 <p>{{template "status" .Status}}</p>
+{{template "progress" .}}
 {{if .Notice}}<div class="card notice">{{.Notice}}</div>{{end}}
 
 <div class="card">
@@ -87,7 +150,7 @@ details summary { cursor:pointer; color:var(--accent); }
     {{range .SKUs}}
     <tr>
       <td><a href="{{$.Base}}/sku?id={{.ID}}"><b>{{.ID}}</b></a></td>
-      <td><a href="{{$.Base}}/sku?id={{.ID}}">{{if .Title}}{{.Title}}{{else}}<span class="muted">название появится после проверки</span>{{end}}</a></td>
+      <td><a href="{{$.Base}}/sku?id={{.ID}}">{{if .Title}}{{.Title}}{{else}}<span class="muted">{{if $.Status.Running}}проверяется…{{else}}название появится после проверки{{end}}</span>{{end}}</a></td>
       <td class="n">{{rub .Price}}</td>
       <td>{{if .Index}}<span class="badge {{statusClass .Index}}">{{statusText .Index}}</span>{{end}}</td>
       <td class="n">{{idx .Index}}</td>
@@ -140,13 +203,14 @@ details summary { cursor:pointer; color:var(--accent); }
 </main></body></html>{{end}}
 
 {{define "sku"}}{{template "head" .}}
-<p><a href="{{.Base}}/">← Все товары</a></p>
+<div class="bar"><a href="{{.Base}}/">← Все товары</a>{{template "logout" .}}</div>
 {{with .SKU}}
 <div class="bar">
   <h1><a href="https://www.wildberries.ru/catalog/{{.ID}}/detail.aspx" target="_blank" rel="noopener">{{.ID}}</a>{{if .Title}} · {{.Title}}{{end}}</h1>
   {{if .Index}}<span class="badge {{statusClass .Index}}">{{statusText .Index}}</span>{{end}}
 </div>
 <p>{{template "status" $.Status}}{{if not .CheckedAt.IsZero}} <span class="muted">Данные от {{.CheckedAt.Format "02.01.2006 15:04"}}, {{$.Region}}.</span>{{end}}</p>
+{{template "progress" $}}
 {{if $.Notice}}<div class="card notice">{{$.Notice}}</div>{{end}}
 
 <div class="card">
@@ -168,7 +232,7 @@ details summary { cursor:pointer; color:var(--accent); }
     <tr>
       <td style="min-width:190px"><a href="#q-{{.Query}}">{{.Query}}</a></td>
       {{if $weighted}}<td class="n">{{if .Weight}}{{.Weight}}{{end}}</td>{{end}}
-      <td>{{if .Index}}<span class="badge {{statusClass .Index}}">{{statusText .Index}}</span>{{else if not .Checked}}<span class="muted">{{if .Error}}ошибка{{else}}нет данных{{end}}</span>{{end}}</td>
+      <td>{{if .Index}}<span class="badge {{statusClass .Index}}">{{statusText .Index}}</span>{{else if not .Checked}}{{if .Error}}<span class="down">ошибка</span>{{else}}<span class="muted">{{if $.Status.Running}}в очереди…{{else}}нет данных{{end}}</span>{{end}}{{end}}</td>
       <td class="n">{{if not .Checked}}{{else if .Pos}}<span class="pos">{{.Pos}}</span> {{template "delta" .Delta}}{{else}}<span class="muted">нет в топ-100</span>{{end}}</td>
       <td class="n">{{if .OurAd}}<span class="tag">реклама</span>{{else if .Organic}}{{.Organic}}{{end}}</td>
       <td class="n">{{rub .Median}}</td>
@@ -231,11 +295,12 @@ details summary { cursor:pointer; color:var(--accent); }
 </main></body></html>{{end}}
 
 {{define "query"}}{{template "head" .}}
-<p>{{if .Back}}<a href="{{.Base}}/sku?id={{.Back}}">← К товару {{.Back}}</a>{{else}}<a href="{{.Base}}/">← Все товары</a>{{end}}</p>
+<div class="bar">{{if .Back}}<a href="{{.Base}}/sku?id={{.Back}}">← К товару {{.Back}}</a>{{else}}<a href="{{.Base}}/">← Все товары</a>{{end}}{{template "logout" .}}</div>
 <div class="bar">
   <h1>«{{.Query}}»</h1>
   {{template "status" .Status}}
 </div>
+{{template "progress" .}}
 {{$q := .Query}}{{$date := .Date}}{{$top := .Top}}
 <div class="card">
   <div class="bar">
@@ -245,7 +310,7 @@ details summary { cursor:pointer; color:var(--accent); }
       <select name="date" onchange="this.form.submit()">{{range .Dates}}<option value="{{.}}" {{if eq . $date}}selected{{end}}>{{.}}</option>{{end}}</select>
     </form>
   </div>
-  {{if not .Result}}<p class="muted">За эту дату выдачи по запросу нет.</p>
+  {{if not .Result}}<p class="muted">{{if .Status.Running}}Выдача по запросу ещё не получена — идёт проверка.{{else}}За эту дату выдачи по запросу нет.{{end}}</p>
   {{else if .Result.Error}}<p class="down">Проверка не удалась: {{.Result.Error}}</p>
   {{else}}
   <p class="muted">Проверено {{.Result.CheckedAt.Format "02.01.2006 15:04"}}, {{.Region}}. Всего товаров по запросу: {{.Result.Total}}. Рекламных карточек в топ-{{.Top}}: {{.Ads}}. Наши товары выделены.</p>
@@ -271,4 +336,36 @@ details summary { cursor:pointer; color:var(--accent); }
   {{end}}
 </div>
 <p class="muted"><a href="{{.Base}}/export.csv?date={{.Date}}&top={{.Top}}">Скачать выдачу за {{day .Date}} в CSV (все запросы, топ-{{.Top}})</a></p>
+</main></body></html>{{end}}
+
+{{define "login"}}{{template "head" .}}
+<div class="login">
+  <div class="card">
+    <h1>Выдача Wildberries</h1>
+    <p class="muted">Каждый день показывает, на каком месте стоит наш товар по поисковым запросам и как его цена выглядит на фоне конкурентов.</p>
+    <h2>Как пользоваться</h2>
+    <ol>
+      <li><b>Добавьте товар.</b> На главной вставьте артикул Wildberries или ссылку на карточку и впишите поисковые запросы, по одному на строку. Показы запроса в рекламе можно дописать после «;».</li>
+      <li><b>Дождитесь проверки.</b> Она запускается сама сразу после добавления: около 7 секунд на запрос, ход виден на странице.</li>
+      <li><b>Откройте товар.</b> Там сводка по каждому запросу и первые 10 конкурентов с ценами.</li>
+    </ol>
+    <p class="muted">Дальше проверка идёт сама каждый день в 09:00 по Москве. Вне расписания — кнопка «Проверить сейчас».</p>
+    <h2>Как читать цифры</h2>
+    <dl>
+      <dt>Индекс</dt><dd>Наша цена, делённая на медиану цен первых 10 конкурентов. 1,00 — в рынке, 1,15 — на 15% дороже.</dd>
+      <dt>Позиция и «без рекламы»</dt><dd>Место в выдаче как есть и место среди обычных карточек.</dd>
+      <dt>Дешевле нас</dt><dd>Сколько из этих 10 конкурентов стоят дешевле.</dd>
+    </dl>
+    <p class="muted">Регион и пороги статусов меняются в настройках на главной.</p>
+  </div>
+  <div class="card enter">
+    <h2>Вход</h2>
+    {{if .Error}}<p class="down">{{.Error}}</p>{{end}}
+    <form method="post" action="{{.Base}}/login" style="margin-top:10px">
+      <p><label for="login">Логин</label><input id="login" name="login" value="{{.Login}}" autocomplete="username" required {{if not .Login}}autofocus{{end}}></p>
+      <p><label for="password">Пароль</label><input id="password" name="password" type="password" autocomplete="current-password" required {{if .Login}}autofocus{{end}}></p>
+      <button>Войти</button>
+    </form>
+  </div>
+</div>
 </main></body></html>{{end}}

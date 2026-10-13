@@ -8,6 +8,9 @@ services:
     ports:
       - "127.0.0.1:8095:8080"
     command: ["wb-parser", "-addr", "0.0.0.0:8080", "-base", "/wb"]
+    # Логин и пароль входа лежат в файле .env рядом: WB_AUTH=логин:пароль
+    environment:
+      - WB_AUTH=${WB_AUTH:?задайте WB_AUTH в файле .env}
     volumes:
       - ./data:/app/data
     shm_size: 1gb

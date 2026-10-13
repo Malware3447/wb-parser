@@ -1,6 +1,7 @@
 .git
 .crush
 data
+.env
 browser/node_modules
 *.exe
 *.json
