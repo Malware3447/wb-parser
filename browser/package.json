@@ -1,0 +1,10 @@
+{
+  "name": "wb-parser-browser",
+  "private": true,
+  "type": "module",
+  "description": "Получение выдачи Wildberries через CloakBrowser",
+  "dependencies": {
+    "cloakbrowser": "^0.6.2",
+    "playwright-core": "^1.56.0"
+  }
+}
