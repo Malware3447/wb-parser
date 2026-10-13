@@ -1,0 +1,274 @@
+{{define "head"}}<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{{if .Status.Running}}<meta http-equiv="refresh" content="5">{{end}}
+<title>Выдача Wildberries</title>
+<style>
+:root { --bg:#f6f6f8; --card:#fff; --text:#1c1c22; --muted:#6d6d78; --line:#e3e3ea; --accent:#7b2cbf; --ours:#f3e8ff; --up:#1a7f37; --down:#c62828;
+  --ok-bg:#dcf5e3; --ok:#14602b; --below-bg:#e9f7df; --below:#3b6b1c; --under-bg:#dbeafe; --under:#1e4fa3; --warn-bg:#fdf0c4; --warn:#7a5600; --bad-bg:#fbdcdc; --bad:#a11d1d; --ad:#fff6e5; }
+@media (prefers-color-scheme: dark) { :root { --bg:#141418; --card:#1e1e24; --text:#ececf1; --muted:#9a9aa6; --line:#30303a; --accent:#c084fc; --ours:#3b2358; --up:#4ade80; --down:#f87171;
+  --ok-bg:#163a22; --ok:#86efac; --below-bg:#24361a; --below:#bbe39a; --under-bg:#172f55; --under:#93c5fd; --warn-bg:#42340c; --warn:#fcd34d; --bad-bg:#4a1818; --bad:#fca5a5; --ad:#33290f; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width:1180px; margin:0 auto; padding:16px; }
+h1 { font-size:22px; margin:0; }
+h2 { font-size:17px; margin:0; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.bar { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-bottom:14px; }
+.muted { color:var(--muted); font-size:13px; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:14px; }
+.scroll { overflow-x:auto; }
+table { border-collapse:collapse; width:100%; }
+th, td { padding:7px 9px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+th { font-size:12px; font-weight:600; color:var(--muted); white-space:nowrap; }
+tr:last-child td { border-bottom:0; }
+td.n, th.n { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+tr.ad td { background:var(--ad); }
+tr.ours td { background:var(--ours); font-weight:600; }
+.tag { font-size:11px; color:var(--warn); border:1px solid currentColor; border-radius:4px; padding:0 4px; white-space:nowrap; }
+.up { color:var(--up); } .down { color:var(--down); }
+.pos { font-size:17px; font-weight:700; }
+.badge { display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap; }
+.badge.ok { background:var(--ok-bg); color:var(--ok); } .badge.below { background:var(--below-bg); color:var(--below); } .badge.under { background:var(--under-bg); color:var(--under); }
+.badge.warn { background:var(--warn-bg); color:var(--warn); } .badge.bad { background:var(--bad-bg); color:var(--bad); }
+.tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; }
+.tile { border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+.tile b { display:block; font-size:20px; font-variant-numeric:tabular-nums; }
+.tile span { color:var(--muted); font-size:12px; }
+button, .btn { font:inherit; padding:7px 14px; border-radius:8px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; display:inline-block; }
+@media (prefers-color-scheme: dark) { button, .btn { color:#1c1c22; } }
+button.plain { background:none; color:var(--muted); border-color:var(--line); }
+button:disabled { opacity:.55; cursor:default; }
+input, textarea, select { font:inherit; width:100%; padding:7px 9px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); }
+select { width:auto; }
+label { display:block; font-size:13px; color:var(--muted); margin-bottom:4px; }
+.form { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.form .wide { grid-column:1 / -1; }
+.form.four { grid-template-columns:repeat(4, 1fr); }
+@media (max-width:640px) { .form.four { grid-template-columns:1fr 1fr; } }
+@media (max-width:640px) { .form { grid-template-columns:1fr; } }
+.notice { border-color:var(--down); }
+.hist { display:flex; gap:4px; }
+.hist span { min-width:34px; text-align:center; font-size:12px; padding:2px 4px; border:1px solid var(--line); border-radius:6px; }
+.hist small { display:block; color:var(--muted); font-size:10px; }
+details summary { cursor:pointer; color:var(--accent); }
+.tabs a { padding:4px 10px; border:1px solid var(--line); border-radius:8px; margin-right:4px; }
+.tabs a.on { background:var(--accent); color:var(--card); border-color:var(--accent); }
+</style>
+</head>
+<body><main>{{end}}
+
+{{define "status"}}
+<span class="muted">
+{{if .Running}}Идёт проверка, страница обновится сама…
+{{else if not .LastRun.IsZero}}Последняя проверка {{.LastRun.Format "02.01 15:04"}}: получено запросов — {{.LastDone}}{{if .LastErr}}, <span class="down">{{.LastErr}}</span>{{end}}.
+{{end}}
+Ежедневно в {{.At}}. Регион: {{.Region}}.
+</span>
+{{end}}
+
+{{define "delta"}}{{if gt . 0}}<span class="up">▲{{.}}</span>{{else if lt . 0}}<span class="down">▼{{slice (print .) 1}}</span>{{end}}{{end}}
+
+{{define "index"}}{{template "head" .}}
+<div class="bar">
+  <h1>Выдача Wildberries</h1>
+  <form method="post" action="{{.Base}}/run"><button {{if .Status.Running}}disabled{{end}}>Проверить сейчас</button></form>
+</div>
+<p>{{template "status" .Status}}</p>
+{{if .Notice}}<div class="card notice">{{.Notice}}</div>{{end}}
+
+<div class="card">
+  {{if .SKUs}}
+  <div class="scroll"><table>
+    <tr><th>Артикул</th><th>Товар</th><th class="n">Наша цена</th><th>Цена к рынку</th><th class="n">Индекс</th><th class="n">Дешевле нас</th><th class="n">Лучшая позиция</th><th class="n">Запросов</th></tr>
+    {{range .SKUs}}
+    <tr>
+      <td><a href="{{$.Base}}/sku?id={{.ID}}"><b>{{.ID}}</b></a></td>
+      <td><a href="{{$.Base}}/sku?id={{.ID}}">{{if .Title}}{{.Title}}{{else}}<span class="muted">название появится после проверки</span>{{end}}</a></td>
+      <td class="n">{{rub .Price}}</td>
+      <td>{{if .Index}}<span class="badge {{statusClass .Index}}">{{statusText .Index}}</span>{{end}}</td>
+      <td class="n">{{idx .Index}}</td>
+      <td class="n">{{if .Compared}}{{.Cheaper}} из {{.Compared}}{{else}}—{{end}}</td>
+      <td class="n">{{if .BestPos}}{{.BestPos}}{{else}}—{{end}}</td>
+      <td class="n">{{len .Queries}}</td>
+    </tr>
+    {{end}}
+  </table></div>
+  <p class="muted" style="margin:10px 0 0">Индекс — наша цена, делённая на медиану цен первых {{.Competitors}} конкурентов по запросу, без рекламных карточек; в строке товара — среднее по его запросам с учётом показов. «Дешевле нас» — сколько из этих конкурентов стоят дешевле.</p>
+  {{else}}
+  <span class="muted">Товаров пока нет. Добавьте первый — выдача по его запросам загрузится сразу.</span>
+  {{end}}
+</div>
+
+<div class="card">
+  <h2>Добавить товар</h2>
+  <form method="post" action="{{.Base}}/sku/save" class="form" style="margin-top:10px">
+    <div><label>Артикул Wildberries или ссылка на товар</label><input name="sku" required placeholder="491550280"></div>
+    <div><label>Название (необязательно)</label><input name="name" placeholder="Подставится из карточки"></div>
+    <div class="wide"><label>Поисковые запросы, по одному на строку; показы в рекламе можно дописать после «;»</label><textarea name="queries" rows="4" required placeholder="мешки для мусора 30 л&#10;пакеты для мусора с ручками;494"></textarea></div>
+    <div><button>Добавить</button></div>
+  </form>
+</div>
+<div class="card">
+  <details>
+    <summary>Настройки: регион и пороги статусов</summary>
+    <form method="post" action="{{.Base}}/settings" style="margin-top:12px">
+      <div class="form">
+        <div><label>Регион выдачи и цен</label>
+          <select name="dest" style="width:100%">
+            {{range .Regions}}<option value="{{.Dest}}" {{if eq .Dest $.Settings.Dest}}selected{{end}}>{{.Name}}</option>{{end}}
+            {{if .CustomDest}}<option value="{{.Settings.Dest}}" selected>код {{.Settings.Dest}}</option>{{end}}
+          </select></div>
+        <div><label>Или свой код региона (dest), если города нет в списке</label><input name="dest_custom" inputmode="numeric" placeholder="например, 123585487"></div>
+      </div>
+      <p class="muted">После смены региона выдача и цены за сегодня загрузятся заново. Данные прошлых дней остаются с тем регионом, с которым были получены.</p>
+      <label>Пороги статусов: индекс — наша цена, делённая на медиану цен конкурентов</label>
+      <div class="form four">
+        <div><label>ниже — «переуценка»</label><input name="underprice" value="{{num .Settings.Underprice}}"></div>
+        <div><label>ниже — «чуть ниже рынка»</label><input name="green_lo" value="{{num .Settings.GreenLo}}"></div>
+        <div><label>до — «в рынке»</label><input name="green_hi" value="{{num .Settings.GreenHi}}"></div>
+        <div><label>до — «дороже рынка», выше — «сильно дороже»</label><input name="yellow_hi" value="{{num .Settings.YellowHi}}"></div>
+      </div>
+      <p style="margin-bottom:0"><button>Сохранить настройки</button></p>
+    </form>
+  </details>
+</div>
+{{if .Dates}}<p class="muted"><a href="{{.Base}}/export.csv">Скачать выдачу за {{day (index .Dates 0)}} в CSV</a></p>{{end}}
+</main></body></html>{{end}}
+
+{{define "sku"}}{{template "head" .}}
+<p><a href="{{.Base}}/">← Все товары</a></p>
+{{with .SKU}}
+<div class="bar">
+  <h1><a href="https://www.wildberries.ru/catalog/{{.ID}}/detail.aspx" target="_blank" rel="noopener">{{.ID}}</a>{{if .Title}} · {{.Title}}{{end}}</h1>
+  {{if .Index}}<span class="badge {{statusClass .Index}}">{{statusText .Index}}</span>{{end}}
+</div>
+<p>{{template "status" $.Status}}{{if not .CheckedAt.IsZero}} <span class="muted">Данные от {{.CheckedAt.Format "02.01.2006 15:04"}}, {{$.Region}}.</span>{{end}}</p>
+{{if $.Notice}}<div class="card notice">{{$.Notice}}</div>{{end}}
+
+<div class="card">
+  <div class="tiles">
+    <div class="tile"><b>{{rub .Price}}</b><span>наша цена{{with .Card}}{{if gt .Basic .Price}}, до скидки {{rub .Basic}}{{end}}{{end}}</span></div>
+    <div class="tile"><b>{{idx .Index}}</b><span>индекс к рынку, {{if .Weighted}}взвешен по показам{{else}}среднее по запросам{{end}}</span></div>
+    <div class="tile"><b>{{if .Compared}}{{.Cheaper}} из {{.Compared}}{{else}}—{{end}}</b><span>конкурентов дешевле нас</span></div>
+    <div class="tile"><b>{{if .BestPos}}{{.BestPos}}{{else}}—{{end}}</b><span>лучшая позиция в выдаче</span></div>
+    {{with .Card}}<div class="tile"><b>{{if .Rating}}{{num .Rating}}{{else}}—{{end}}</b><span>рейтинг, отзывов: {{.Feedbacks}}</span></div>{{end}}
+  </div>
+</div>
+
+<div class="card">
+  <h2>Сводка по запросам</h2>
+  <div class="scroll" style="margin-top:8px"><table>
+    <tr><th>Запрос</th>{{if .Weighted}}<th class="n">Показы</th>{{end}}<th>Цена к рынку</th><th class="n">Позиция</th><th class="n">Без рекламы</th><th class="n">Медиана топ-{{$.Competitors}}</th><th class="n">Мин. в топ-3</th><th class="n">Индекс</th><th class="n">К пред. дню</th><th class="n">Дешевле нас</th><th>Самый дешёвый конкурент</th><th>Позиция по дням</th></tr>
+    {{$weighted := .Weighted}}
+    {{range .Queries}}
+    <tr>
+      <td style="min-width:190px"><a href="#q-{{.Query}}">{{.Query}}</a></td>
+      {{if $weighted}}<td class="n">{{if .Weight}}{{.Weight}}{{end}}</td>{{end}}
+      <td>{{if .Index}}<span class="badge {{statusClass .Index}}">{{statusText .Index}}</span>{{else if not .Checked}}<span class="muted">{{if .Error}}ошибка{{else}}нет данных{{end}}</span>{{end}}</td>
+      <td class="n">{{if not .Checked}}{{else if .Pos}}<span class="pos">{{.Pos}}</span> {{template "delta" .Delta}}{{else}}<span class="muted">нет в топ-100</span>{{end}}</td>
+      <td class="n">{{if .OurAd}}<span class="tag">реклама</span>{{else if .Organic}}{{.Organic}}{{end}}</td>
+      <td class="n">{{rub .Median}}</td>
+      <td class="n">{{rub .Min3}}</td>
+      <td class="n">{{idx .Index}}</td>
+      <td class="n">{{with signed .IndexDelta}}{{.}}{{end}}</td>
+      <td class="n">{{if .Index}}{{.Cheaper}} из {{.Compared}}{{else}}—{{end}}</td>
+      <td>{{with .Cheapest}}{{rub .Price}} · <a href="https://www.wildberries.ru/catalog/{{.ID}}/detail.aspx" target="_blank" rel="noopener">{{.ID}}</a> <span class="muted">{{.Brand}}</span>{{end}}</td>
+      <td><div class="hist">{{range .History}}<span><small>{{day .Date}}</small>{{if not .Checked}}·{{else if .Pos}}{{.Pos}}{{else}}—{{end}}</span>{{end}}</div></td>
+    </tr>
+    {{else}}
+    <tr><td colspan="12" class="muted">Запросов нет — добавьте их ниже.</td></tr>
+    {{end}}
+  </table></div>
+  <p class="muted" style="margin:10px 0 0">Цены считаются по первым {{$.Competitors}} обычным карточкам конкурентов: реклама и наши товары в расчёт не идут. «К пред. дню» — изменение индекса с прошлой проверки.</p>
+</div>
+
+{{$sku := .}}
+{{range .Queries}}{{if .Checked}}
+<div class="card" id="q-{{.Query}}">
+  <div class="bar">
+    <h2>«{{.Query}}» — первые {{$.Competitors}} конкурентов</h2>
+    <a href="{{$.Base}}/query?q={{.Query}}&sku={{$sku.ID}}">Вся выдача →</a>
+  </div>
+  <p class="muted">{{if .Index}}Медиана {{rub .Median}} · индекс {{idx .Index}} · дешевле нас {{.Cheaper}} из {{.Compared}}.{{end}}
+    {{if .Pos}}Наш товар на {{.Pos}} месте{{if .OurAd}}, по рекламе{{else if ne .Organic .Pos}}, без рекламы — на {{.Organic}}{{end}}.{{else}}Нашего товара в первых 100 нет.{{end}}</p>
+  <div class="scroll"><table>
+    <tr><th class="n">№</th><th class="n">Без рекламы</th><th>Артикул</th><th>Товар</th><th>Бренд</th><th>Продавец</th><th class="n">Цена</th><th class="n">К нашей</th><th class="n">Рейтинг</th><th class="n">Отзывы</th></tr>
+    {{range .Top}}
+    <tr class="{{if .Ours}}ours{{else if .Ad}}ad{{end}}">
+      <td class="n">{{.Pos}}</td>
+      <td class="n">{{if .Ad}}<span class="tag">реклама</span>{{else}}{{.Organic}}{{end}}</td>
+      <td><a href="https://www.wildberries.ru/catalog/{{.ID}}/detail.aspx" target="_blank" rel="noopener">{{.ID}}</a></td>
+      <td>{{.Name}}{{if .Ours}} <span class="muted">— наш</span>{{end}}</td>
+      <td>{{.Brand}}</td>
+      <td>{{.Supplier}}</td>
+      <td class="n">{{rub .Price}}</td>
+      <td class="n">{{if not .Ours}}{{versus .Price $sku.Price}}{{end}}</td>
+      <td class="n">{{if .Rating}}{{num .Rating}}{{else}}—{{end}}</td>
+      <td class="n">{{.Feedbacks}}</td>
+    </tr>
+    {{end}}
+  </table></div>
+</div>
+{{end}}{{end}}
+
+<div class="card">
+  <h2>Запросы товара</h2>
+  <form method="post" action="{{$.Base}}/sku/save" class="form" style="margin-top:10px">
+    <input type="hidden" name="sku" value="{{.ID}}">
+    <div class="wide"><label>Название (необязательно)</label><input name="name" value="{{.Name}}" placeholder="Подставится из карточки"></div>
+    <div class="wide"><label>Поисковые запросы, по одному на строку. Показы в рекламе можно дописать после «;» — например, «мешки для мусора 30 л;1226»</label><textarea name="queries" rows="8">{{$.Lines}}</textarea></div>
+    <div><button>Сохранить</button></div>
+  </form>
+  <form method="post" action="{{$.Base}}/sku/delete" onsubmit="return confirm('Убрать товар {{.ID}} из списка?')" style="margin-top:12px">
+    <input type="hidden" name="sku" value="{{.ID}}"><button class="plain">Убрать товар из списка</button>
+  </form>
+</div>
+{{end}}
+</main></body></html>{{end}}
+
+{{define "query"}}{{template "head" .}}
+<p>{{if .Back}}<a href="{{.Base}}/sku?id={{.Back}}">← К товару {{.Back}}</a>{{else}}<a href="{{.Base}}/">← Все товары</a>{{end}}</p>
+<div class="bar">
+  <h1>«{{.Query}}»</h1>
+  {{template "status" .Status}}
+</div>
+{{$q := .Query}}{{$date := .Date}}{{$top := .Top}}
+<div class="card">
+  <div class="bar">
+    <div class="tabs">{{range .Tops}}<a href="{{$.Base}}/query?q={{$q}}&date={{$date}}&top={{.}}&sku={{$.Back}}" {{if eq . $top}}class="on"{{end}}>Топ-{{.}}</a>{{end}}</div>
+    <form method="get" action="{{.Base}}/query">
+      <input type="hidden" name="q" value="{{.Query}}"><input type="hidden" name="top" value="{{.Top}}"><input type="hidden" name="sku" value="{{.Back}}">
+      <select name="date" onchange="this.form.submit()">{{range .Dates}}<option value="{{.}}" {{if eq . $date}}selected{{end}}>{{.}}</option>{{end}}</select>
+    </form>
+  </div>
+  {{if not .Result}}<p class="muted">За эту дату выдачи по запросу нет.</p>
+  {{else if .Result.Error}}<p class="down">Проверка не удалась: {{.Result.Error}}</p>
+  {{else}}
+  <p class="muted">Проверено {{.Result.CheckedAt.Format "02.01.2006 15:04"}}, {{.Region}}. Всего товаров по запросу: {{.Result.Total}}. Рекламных карточек в топ-{{.Top}}: {{.Ads}}. Наши товары выделены.</p>
+  <div class="scroll"><table>
+    <tr><th class="n">№</th><th></th><th class="n">Без рекламы</th><th>Артикул</th><th>Бренд</th><th>Название</th><th>Продавец</th><th class="n">До скидки</th><th class="n">Цена</th><th class="n">Скидка</th><th class="n">Рейтинг</th><th class="n">Отзывы</th></tr>
+    {{range .Rows}}
+    <tr class="{{if .Ours}}ours{{else if .Ad}}ad{{end}}">
+      <td class="n">{{.Pos}}</td>
+      <td class="n">{{if .New}}<span class="muted">нов.</span>{{else}}{{template "delta" .Delta}}{{end}}</td>
+      <td class="n">{{if .Ad}}<span class="tag">реклама</span>{{else}}{{.Organic}}{{end}}</td>
+      <td><a href="https://www.wildberries.ru/catalog/{{.ID}}/detail.aspx" target="_blank" rel="noopener">{{.ID}}</a></td>
+      <td>{{.Brand}}</td>
+      <td>{{.Name}}</td>
+      <td>{{.Supplier}}</td>
+      <td class="n muted">{{rub .Basic}}</td>
+      <td class="n">{{rub .Price}}</td>
+      <td class="n">{{with percent .Basic .Price}}−{{.}}%{{end}}</td>
+      <td class="n">{{if .Rating}}{{num .Rating}}{{else}}—{{end}}</td>
+      <td class="n">{{.Feedbacks}}</td>
+    </tr>
+    {{end}}
+  </table></div>
+  {{end}}
+</div>
+<p class="muted"><a href="{{.Base}}/export.csv?date={{.Date}}&top={{.Top}}">Скачать выдачу за {{day .Date}} в CSV (все запросы, топ-{{.Top}})</a></p>
+</main></body></html>{{end}}

@@ -2,44 +2,41 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log"
+	"net/http"
+	"os"
 	"time"
+	_ "time/tzdata"
 
-	"wb-parser/internal/parser"
+	"wb-parser/internal/store"
+	"wb-parser/internal/web"
 )
 
 func main() {
-	queriesPath := flag.String("queries", "queries.csv", "файл со списком «SKU;запрос»")
-	outDir := flag.String("out", "data", "папка для отчётов")
-	top := flag.Int("top", 30, "сколько первых товаров выдачи сохранять")
+	addr := flag.String("addr", "127.0.0.1:8080", "адрес, на котором открывается интерфейс")
+	dataDir := flag.String("data", "data", "папка с данными")
+	at := flag.String("at", "09:00", "время ежедневной проверки, ЧЧ:ММ")
+	tz := flag.String("tz", "Europe/Moscow", "часовой пояс расписания")
 	fetcher := flag.String("fetcher", "browser/fetch.mjs", "скрипт, получающий выдачу через браузер")
-	headed := flag.Bool("headed", false, "показывать окно браузера")
-	raw := flag.Bool("raw", false, "сохранять полные ответы Wildberries")
+	auth := flag.String("auth", os.Getenv("WB_AUTH"), "логин:пароль для входа в интерфейс (или переменная WB_AUTH)")
+	base := flag.String("base", "", "путь, под которым интерфейс виден снаружи, например /wb")
 	flag.Parse()
 
-	tasks, err := parser.LoadTasks(*queriesPath)
+	loc, err := time.LoadLocation(*tz)
 	if err != nil {
-		log.Fatalf("Ошибка чтения списка запросов: %v", err)
+		log.Fatalf("Ошибка часового пояса: %v", err)
 	}
-	queries := parser.UniqueQueries(tasks)
-	fmt.Printf("SKU и запросов: %d, разных запросов: %d\n", len(tasks), len(queries))
-
-	results, fetchErr := parser.Fetch(*fetcher, queries, *headed)
-	if len(results) == 0 {
-		log.Fatalf("Ошибка получения выдачи: %v", fetchErr)
+	if _, err := time.Parse("15:04", *at); err != nil {
+		log.Fatalf("Время проверки должно быть в виде ЧЧ:ММ: %v", err)
 	}
-
-	report, err := parser.WriteReport(*outDir, time.Now(), tasks, results, *top, *raw)
+	st, err := store.Open(*dataDir)
 	if err != nil {
-		log.Fatalf("Ошибка записи отчёта: %v", err)
+		log.Fatalf("Ошибка открытия данных: %v", err)
 	}
 
-	fmt.Printf("\n--- Готово ---\n")
-	fmt.Printf("Выдача (топ-%d): %s\n", *top, report.TopFile)
-	fmt.Printf("Сводка по SKU:   %s\n", report.SummaryFile)
-	fmt.Printf("Запросов получено: %d из %d\n", report.OK, len(queries))
-	if fetchErr != nil {
-		log.Fatalf("Часть запросов не получена: %v", fetchErr)
-	}
+	srv := web.New(st, *fetcher, *at, loc, *auth, *base)
+	go srv.Schedule()
+
+	log.Printf("Интерфейс: http://%s, ежедневная проверка в %s (%s)", *addr, *at, *tz)
+	log.Fatal(http.ListenAndServe(*addr, srv))
 }

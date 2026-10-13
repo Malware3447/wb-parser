@@ -1,0 +1,13 @@
+# Выкладка на сервер: docker compose up -d --build
+services:
+  wb-parser:
+    build: .
+    container_name: wb-parser
+    restart: unless-stopped
+    # Интерфейс виден только с самого сервера; наружу его отдаёт nginx по адресу /wb/
+    ports:
+      - "127.0.0.1:8095:8080"
+    command: ["wb-parser", "-addr", "0.0.0.0:8080", "-base", "/wb"]
+    volumes:
+      - ./data:/app/data
+    shm_size: 1gb

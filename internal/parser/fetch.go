@@ -9,16 +9,16 @@ import (
 	"path/filepath"
 )
 
-// Fetch получает выдачу по запросам через браузерный скрипт.
+// Fetch получает через браузерный скрипт выдачу по запросам и карточки товаров для региона dest.
 // Возвращает всё, что удалось получить, даже если часть запросов завершилась ошибкой
-func Fetch(fetcher string, queries []string, headed bool) ([]Result, error) {
+func Fetch(fetcher string, queries []string, cards []int64, dest int64, headed bool) ([]Result, error) {
 	tmp, err := os.MkdirTemp("", "wb-parser-")
 	if err != nil {
 		return nil, fmt.Errorf("ошибка создания временной папки: %w", err)
 	}
 	defer os.RemoveAll(tmp)
 
-	input, err := json.Marshal(map[string]interface{}{"queries": queries, "headed": headed})
+	input, err := json.Marshal(map[string]interface{}{"queries": queries, "cards": cards, "dest": dest, "headed": headed})
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +48,7 @@ func Fetch(fetcher string, queries []string, headed bool) ([]Result, error) {
 		}
 	}
 	if failed > 0 {
-		return results, fmt.Errorf("не получено запросов: %d", failed)
+		return results, fmt.Errorf("не получено запросов и карточек: %d", failed)
 	}
 	if runErr != nil {
 		return results, fmt.Errorf("браузерный скрипт завершился с ошибкой: %w", runErr)

@@ -1,0 +1,8 @@
+.git
+.crush
+data
+browser/node_modules
+*.exe
+*.json
+*.txt
+!browser/*.json
