@@ -58,11 +58,19 @@ go run ./cmd
 docker compose up -d --build
 ```
 
-Контейнер слушает `127.0.0.1:8095` и рассчитан на адрес с префиксом `/wb` (параметр `-base`); наружу его отдаёт nginx:
+Контейнер слушает `127.0.0.1:8095`, наружу его отдаёт nginx. Сейчас интерфейс открыт в корне домена https://wb.uxbrain.ru/:
 
 ```
-location /wb/ { proxy_pass http://127.0.0.1:8095/; }
+location / {
+    proxy_pass http://127.0.0.1:8095;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
 ```
+
+Заголовок `X-Forwarded-Proto` нужен, чтобы при работе через https cookie входа ставилась с пометкой Secure.
+
+Чтобы открыть интерфейс под префиксом (например, `/wb/`), добавьте в `command` в `docker-compose.yml` параметры `"-base", "/wb"`, а в nginx — `location /wb/ { proxy_pass http://127.0.0.1:8095/; ... }`.
 
 Логин и пароль входа берутся из файла `.env` рядом с `docker-compose.yml` (в репозиторий он не попадает):
 

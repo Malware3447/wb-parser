@@ -4,10 +4,10 @@ services:
     build: .
     container_name: wb-parser
     restart: unless-stopped
-    # Интерфейс виден только с самого сервера; наружу его отдаёт nginx по адресу /wb/
+    # Интерфейс виден только с самого сервера; наружу его отдаёт nginx на https://wb.uxbrain.ru/
     ports:
       - "127.0.0.1:8095:8080"
-    command: ["wb-parser", "-addr", "0.0.0.0:8080", "-base", "/wb"]
+    command: ["wb-parser", "-addr", "0.0.0.0:8080"]
     # Логин и пароль входа лежат в файле .env рядом: WB_AUTH=логин:пароль
     environment:
       - WB_AUTH=${WB_AUTH:?задайте WB_AUTH в файле .env}
