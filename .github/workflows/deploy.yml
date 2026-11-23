@@ -1,5 +1,5 @@
 # Каждый push в main: проверка сборки, затем выкладка на https://wb.uxbrain.ru/.
-# Ключ DEPLOY_KEY (Settings → Secrets and variables → Actions) на сервере может
+# Ключ WB_PARSER (Settings → Secrets and variables → Actions) на сервере может
 # только запустить скрипт выкладки /usr/local/bin/wb-deploy — ничего другого.
 name: deploy
 on:
@@ -27,9 +27,9 @@ jobs:
     steps:
       - name: Выкладка на стенд
         env:
-          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          DEPLOY_KEY: ${{ secrets.WB_PARSER }}
         run: |
-          [ -n "$DEPLOY_KEY" ] || { echo "::error::Нет секрета DEPLOY_KEY"; exit 1; }
+          [ -n "$DEPLOY_KEY" ] || { echo "::error::Нет секрета WB_PARSER"; exit 1; }
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
           echo "5.42.96.149 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMIAOfUrK2T3pDln9co0hp5+ixirf0tT9Ze8pfYRb4x5" > ~/.ssh/known_hosts
